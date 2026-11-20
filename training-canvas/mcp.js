@@ -143,8 +143,13 @@ async function callTool(pool,name,a){
    const canvas=r.rows[0].payload;
    if(!canvas||!Array.isArray(canvas.cards))throw Error('Invalid stored canvas');
    if(canvas.cards.length>=1500)throw Error('Card limit reached');
-   const i=canvas.cards.length;
-   card.x=110+(i%5)*365;card.y=95+Math.floor(i/5)*320;
+   const last=canvas.cards[canvas.cards.length-1];
+   card.x=last?last.x+365:110;card.y=last?last.y:95;
+   const height=c=>Math.min(680,225+Math.ceil((c.note||'').length/32)*24);
+   for(let row=0;row<100;row++){
+    const y=card.y+row*320;
+    if(!canvas.cards.some(c=>card.x<c.x+355&&card.x+355>c.x&&y<c.y+height(c)+25&&y+320>c.y)){card.y=y;break;}
+   }
    canvas.cards.push(card);
    await conn.query('UPDATE workspaces SET payload=$2::jsonb,updated_at=NOW() WHERE id=$1',[a.profile_id,JSON.stringify(canvas)]);
    await conn.query('COMMIT');
