@@ -54,7 +54,9 @@ const toolSchemas=[
  {name:'list_training_profiles',description:'List client or personal training journal profiles from your private Coach Journal.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true}},
  {name:'read_training_profile',description:'Read all training cards and notes for a named profile ID. Use list_training_profiles first if the ID is unknown.',inputSchema:{type:'object',properties:{profile_id:{type:'string',description:'Exact profile id returned by list_training_profiles'}},required:['profile_id'],additionalProperties:false},annotations:{readOnlyHint:true}},
  {name:'create_training_profile',description:'Create a new profile/workspace in the private Coach Journal. Avoid duplicates by listing first.',inputSchema:{type:'object',properties:{profile_name:{type:'string',description:'Name to show in workspace selector'}},required:['profile_name'],additionalProperties:false},annotations:{destructiveHint:false}},
- {name:'add_training_card',description:'Append one dated, free-form training card to a profile without deleting existing journal cards. If necessary first create or locate the profile. Do not invent exercises, dates, loads or repetitions.',inputSchema:{type:'object',properties:{profile_id:{type:'string'},title:{type:'string'},date:{type:'string',description:'YYYY-MM-DD, or empty if unknown'},note:{type:'string',description:'Free-text session details'},type:{type:'string',enum:['training','goal','habit','milestone']}},required:['profile_id','title','note'],additionalProperties:false},annotations:{destructiveHint:false}}
+ {name:'add_training_card',description:'Append one dated, free-form training card to a profile without deleting existing journal cards. If necessary first create or locate the profile. Do not invent exercises, dates, loads or repetitions.',inputSchema:{type:'object',properties:{profile_id:{type:'string'},title:{type:'string'},date:{type:'string',description:'YYYY-MM-DD, or empty if unknown'},note:{type:'string',description:'Free-text session details'},type:{type:'string',enum:['training','goal','habit','milestone']}},required:['profile_id','title','note'],additionalProperties:false},annotations:{destructiveHint:false}},
+ {name:'upsert_workout_session',description:'Create ONE Workout card per profile and date, or append exercise updates and corrections to that existing workout. Use for successive exercise reports in the same session; never create a separate card per exercise. Do not invent repetitions, loads, test results or completion.',inputSchema:{type:'object',properties:{profile_id:{type:'string'},date:{type:'string',description:'YYYY-MM-DD session date'},note:{type:'string',description:'New session details; appended to existing workout unless mode is replace'},title:{type:'string',description:'Optional workout title for newly created card'},mode:{type:'string',enum:['append','replace'],description:'append (default) or replace the complete workout note'}},required:['profile_id','date','note'],additionalProperties:false},annotations:{destructiveHint:false}},
+ {name:'consolidate_training_cards',description:'Combine explicitly selected existing cards into ONE workout card using the supplied verified consolidated note. The listed cards are removed after merging, so only use when explicitly requested and after reading the profile. Do not include History, Objectives or unrelated workouts.',inputSchema:{type:'object',properties:{profile_id:{type:'string'},card_ids:{type:'array',items:{type:'string'},minItems:2},date:{type:'string'},title:{type:'string'},note:{type:'string'}},required:['profile_id','card_ids','date','title','note'],additionalProperties:false},annotations:{destructiveHint:true}}
 ];
 const validId=s=>typeof s==='string'&&/^[a-zA-Z0-9_-]{1,90}$/.test(s);
 async function callTool(pool,name,a){
@@ -76,6 +78,56 @@ async function callTool(pool,name,a){
   const canvas={cards:[],edges:[],panX:100,panY:85,scale:1};
   const r=await pool.query('INSERT INTO workspaces(id,name,payload) VALUES($1,$2,$3::jsonb) RETURNING id,name',[id,name,JSON.stringify(canvas)]);
   return {profile:r.rows[0],created:true};
+ }
+ if(name==='upsert_workout_session'){
+  if(!validId(a.profile_id)||typeof a.date!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(a.date))throw Error('Invalid profile or date');
+  if(typeof a.note!=='string'||!a.note.trim()||a.note.length>14000)throw Error('Invalid workout note');
+  const conn=await pool.connect();
+  try{
+   await conn.query('BEGIN');
+   const r=await conn.query('SELECT payload FROM workspaces WHERE id=$1 FOR UPDATE',[a.profile_id]);
+   if(!r.rows.length)throw Error('Profile not found');
+   const canvas=r.rows[0].payload;
+   if(!canvas||!Array.isArray(canvas.cards))throw Error('Invalid canvas');
+   let card=canvas.cards.find(c=>c.type==='training'&&c.date===a.date&&/^Workout(?:\\s|\\s*[—–-])/i.test(c.title||''));
+   let created=false;
+   if(card){
+    card.note=a.mode==='replace'?a.note:card.note.trimEnd()+'\\n'+a.note;
+    if(card.note.length>15000)throw Error('Workout note too large; consolidate older details first');
+   }else{
+    if(canvas.cards.length>=1500)throw Error('Card limit reached');
+    const last=canvas.cards[canvas.cards.length-1];
+    let x=last?last.x+365:110,y=last?last.y:95;
+    const height=c=>Math.min(680,225+Math.ceil((c.note||'').length/32)*24);
+    for(let row=0;row<100;row++){const ty=y+row*320;if(!canvas.cards.some(c=>x<c.x+355&&x+355>c.x&&ty<c.y+height(c)+25&&ty+320>c.y)){y=ty;break;}}
+    card={id:crypto.randomUUID(),title:String(a.title||'Workout — '+a.date).slice(0,120),note:a.note,date:a.date,type:'training',x,y};
+    canvas.cards.push(card);created=true;
+   }
+   await conn.query('UPDATE workspaces SET payload=$2::jsonb,updated_at=NOW() WHERE id=$1',[a.profile_id,JSON.stringify(canvas)]);
+   await conn.query('COMMIT');
+   return {created,updated:!created,card,profile_id:a.profile_id};
+  }catch(e){await conn.query('ROLLBACK');throw e}finally{conn.release()}
+ }
+ if(name==='consolidate_training_cards'){
+  if(!validId(a.profile_id)||!Array.isArray(a.card_ids)||a.card_ids.length<2||new Set(a.card_ids).size!==a.card_ids.length)throw Error('Invalid card selection');
+  if(typeof a.date!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(a.date)||typeof a.note!=='string'||!a.note.trim()||a.note.length>15000||typeof a.title!=='string'||!a.title.trim())throw Error('Invalid session details');
+  const conn=await pool.connect();
+  try{
+   await conn.query('BEGIN');
+   const r=await conn.query('SELECT payload FROM workspaces WHERE id=$1 FOR UPDATE',[a.profile_id]);
+   if(!r.rows.length)throw Error('Profile not found');
+   const canvas=r.rows[0].payload;
+   if(!canvas||!Array.isArray(canvas.cards))throw Error('Invalid canvas');
+   const selected=a.card_ids.map(id=>canvas.cards.find(c=>c.id===id));
+   if(selected.some(c=>!c||c.type!=='training'||c.date!==a.date||/^(History|Objectives)$/i.test(c.title||'')))throw Error('All selected cards must be dated training entries; History and Objectives are protected');
+   const target=selected[0],discard=new Set(a.card_ids.slice(1));
+   target.title=a.title.slice(0,120);target.note=a.note;
+   canvas.cards=canvas.cards.filter(c=>!discard.has(c.id));
+   canvas.edges=(canvas.edges||[]).filter(e=>!discard.has(e[0])&&!discard.has(e[1]));
+   await conn.query('UPDATE workspaces SET payload=$2::jsonb,updated_at=NOW() WHERE id=$1',[a.profile_id,JSON.stringify(canvas)]);
+   await conn.query('COMMIT');
+   return {merged:true,card:target,removed_count:discard.size,profile_id:a.profile_id};
+  }catch(e){await conn.query('ROLLBACK');throw e}finally{conn.release()}
  }
  if(name==='add_training_card'){
   if(!validId(a.profile_id))throw Error('Invalid profile ID');
