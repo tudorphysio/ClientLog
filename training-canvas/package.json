@@ -1,0 +1,15 @@
+{
+  "name": "training-canvas-coach-journal",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Private tablet-first Coach Journal with PostgreSQL",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
