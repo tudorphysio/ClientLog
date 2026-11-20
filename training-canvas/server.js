@@ -146,7 +146,51 @@ async function handler(req,res) {
   }
   return send(res,404,{error:'Not found'});
 }
-Promise.all([setup(),mcpBridge.init(pool)]).then(()=>{
+// One-time, reversible cleanup of legacy exercise-per-card entries.
+// Preserve the original payload in the database before rewriting any workspace.
+async function consolidateLegacyWorkoutCards(){
+ await pool.query("CREATE TABLE IF NOT EXISTS coach_journal_migration_backups (workspace_id TEXT NOT NULL, migration_key TEXT NOT NULL, payload JSONB NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW(), PRIMARY KEY(workspace_id,migration_key))");
+ const rows=await pool.query("SELECT id,payload FROM workspaces");
+ for(const row of rows.rows){
+  const canvas=row.payload;
+  if(!canvas||!Array.isArray(canvas.cards))continue;
+  const groups=new Map();
+  for(const c of canvas.cards){
+   if(c.type!=='training'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(c.date||'')||/^(History|Objectives)$/i.test((c.title||'').trim()))continue;
+   if(!groups.has(c.date))groups.set(c.date,[]);
+   groups.get(c.date).push(c);
+  }
+  let changed=false;
+  const next=JSON.parse(JSON.stringify(canvas));
+  for(const [date,items] of groups){
+   // Only migrate clear legacy exercise-per-card sessions, not distinct workouts.
+   const legacy=items.length>=4&&items.some(c=>/^Planned session/i.test(c.title||''))&&items.some(c=>/^(Completed|Correction|In progress|Session adjustment)/i.test(c.title||''));
+   if(!legacy)continue;
+   const ids=new Set(items.map(c=>c.id));
+   const ordered=next.cards.filter(c=>ids.has(c.id));
+   const primary=ordered[0];
+   primary.title='Workout — '+date;
+   primary.note=ordered.map(c=>'### '+c.title+'\\n'+c.note).join('\\n\\n');
+   const goal=next.cards.find(c=>/^(Objectives|Goals)$/i.test((c.title||'').trim()));
+   if(goal){primary.x=goal.x+365;primary.y=goal.y;}
+   next.cards=next.cards.filter(c=>!ids.has(c.id)||c.id===primary.id);
+   next.edges=(next.edges||[]).filter(e=>next.cards.some(c=>c.id===e[0])&&next.cards.some(c=>c.id===e[1]));
+   changed=true;
+  }
+  if(!changed)continue;
+  const conn=await pool.connect();
+  try{
+   await conn.query('BEGIN');
+   const locked=await conn.query('SELECT payload FROM workspaces WHERE id=$1 FOR UPDATE',[row.id]);
+   if(!locked.rows.length||JSON.stringify(locked.rows[0].payload)!==JSON.stringify(canvas)){await conn.query('ROLLBACK');continue;}
+   await conn.query("INSERT INTO coach_journal_migration_backups(workspace_id,migration_key,payload) VALUES($1,'legacy-workout-cards-v1',$2::jsonb) ON CONFLICT DO NOTHING",[row.id,JSON.stringify(canvas)]);
+   await conn.query('UPDATE workspaces SET payload=$2::jsonb,updated_at=NOW() WHERE id=$1',[row.id,JSON.stringify(next)]);
+   await conn.query('COMMIT');
+   console.log('Consolidated legacy workout notes in workspace '+row.id);
+  }catch(e){await conn.query('ROLLBACK');throw e;}finally{conn.release();}
+ }
+}
+Promise.all([setup().then(consolidateLegacyWorkoutCards),mcpBridge.init(pool)]).then(()=>{
   http.createServer((req,res)=>handler(req,res).catch(err=>{
     console.error('Request failed',err.message);
     if(!res.headersSent)send(res,err.status||500,{error:err.status?err.message:'Server error'});
