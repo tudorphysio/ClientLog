@@ -82,7 +82,7 @@ function normalizeCanvas(x) {
 }
 async function handler(req,res) {
   const pathname=new URL(req.url||'/', 'http://localhost').pathname;
-  if (mcpBridge.handles(pathname)) return mcpBridge.handle(req,res,pool,PASSWORD);
+  if (mcpBridge.handles(pathname)) return mcpBridge.handle(req,res,pool,authorized);
   if(pathname==='/health')return send(res,200,{ok:true});
   if(pathname==='/login' && req.method==='GET') return serve(res,loginPage,'text/html; charset=utf-8');
   if(pathname==='/api/login' && req.method==='POST') {
