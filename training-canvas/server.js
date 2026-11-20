@@ -156,7 +156,7 @@ async function consolidateLegacyWorkoutCards(){
   if(!canvas||!Array.isArray(canvas.cards))continue;
   const groups=new Map();
   for(const c of canvas.cards){
-   if(c.type!=='training'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(c.date||'')||/^(History|Objectives)$/i.test((c.title||'').trim()))continue;
+   if(c.type!=='training'||!/^\d{4}-\d{2}-\d{2}$/.test(c.date||'')||/^(History|Objectives)$/i.test((c.title||'').trim()))continue;
    if(!groups.has(c.date))groups.set(c.date,[]);
    groups.get(c.date).push(c);
   }
@@ -170,7 +170,7 @@ async function consolidateLegacyWorkoutCards(){
    const ordered=next.cards.filter(c=>ids.has(c.id));
    const primary=ordered[0];
    primary.title='Workout — '+date;
-   primary.note=ordered.map(c=>'### '+c.title+'\\n'+c.note).join('\\n\\n');
+   primary.note=ordered.map(c=>'### '+c.title+'\n'+c.note).join('\n\n');
    const goal=next.cards.find(c=>/^(Objectives|Goals)$/i.test((c.title||'').trim()));
    if(goal){primary.x=goal.x+365;primary.y=goal.y;}
    next.cards=next.cards.filter(c=>!ids.has(c.id)||c.id===primary.id);
