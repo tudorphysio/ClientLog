@@ -1,0 +1,12 @@
+{
+  "name": "training-canvas-coach-journal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tablet-first personal Training Canvas",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
