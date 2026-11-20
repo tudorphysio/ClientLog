@@ -19,3 +19,9 @@ The existing GitHub/Railway production deployment is deliberately unchanged. The
 
 ## Intended design direction
 Card dates and types are optional conveniences; the body remains unrestricted, exactly like a sticky note.
+## Tablet-first business workspace (November 20, 2026)
+- Refined coach journal visual design: near-white canvas, ivory paper cards, quiet gold edging, graphite type.
+- Larger touch targets, clear zoom +/- controls for tablets, draggable card headers and unrestricted note fields.
+- Workspace selector and **+ Profile** create separate browser-local sets of cards for demonstration.
+- There is **no authentication, user permission model, server database, or cross-device sync yet**. Do not put sensitive real client records in this prototype. LocalStorage data is not a secure professional records system.
+- This is a feature branch / pull request, not a live tablet app or Railway release. The app must be integrated with authenticated backend storage before actual client use.
