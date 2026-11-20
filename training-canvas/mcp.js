@@ -101,7 +101,7 @@ async function callTool(pool,name,a){
  }
  throw Error('Unknown tool');
 }
-async function handle(req,res,pool,password){
+async function handle(req,res,pool,isAuthorized){
  const path=new URL(req.url||'/',BASE).pathname;
  if(path==='/.well-known/oauth-authorization-server' ||path==='/.well-known/openid-configuration'){
   if(req.method==='GET')return json(res,200,metadata);
@@ -128,12 +128,18 @@ async function handle(req,res,pool,password){
   const cid=b.client_id,redir=b.redirect_uri,challenge=b.code_challenge;
   const reg=await pool.query('SELECT redirect_uris FROM oauth_clients WHERE id=$1',[cid||'']);
   if(!reg.rows.length||!reg.rows[0].redirect_uris.includes(redir)||!validateRedirect(redir)||b.response_type!=='code'||b.code_challenge_method!=='S256'||!challenge||!/^[A-Za-z0-9_-]{43,128}$/.test(challenge))return text(res,400,'Invalid OAuth authorization request');
+  // Use the same authenticated browser session as the journal. Never ask for
+  // the app password on a third-party connection consent page.
+  if(req.method==='GET'&&!isAuthorized(req)){
+    res.writeHead(302,{location:'/login?next='+encodeURIComponent(u.pathname+u.search),'cache-control':'no-store'});
+    res.end();return;
+  }
+  if(!isAuthorized(req))return text(res,401,'Please sign into Coach Journal first, then restart the connection from ChatGPT.');
   if(req.method==='GET'){
    const esc=s=>String(s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
    const hidden=['client_id','redirect_uri','response_type','state','scope','code_challenge','code_challenge_method','resource'].map(k=>'<input type="hidden" name="'+k+'" value="'+esc(b[k])+'">').join('');
-   return text(res,200,'<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize Coach Journal</title><body style="font:17px system-ui;background:#faf9f4;display:grid;place-items:center;min-height:90vh"><form method="POST" action="/oauth/authorize" style="max-width:420px;background:white;padding:28px;border:1px solid #d7c6a2;border-radius:12px"><h2>Connect Coach Journal to ChatGPT</h2><p>Allow ChatGPT to read your profiles and add training cards.</p>'+hidden+'<label>Coach Journal password<br><input name="password" type="password" required autocomplete="current-password" style="font-size:18px;padding:10px;margin-top:8px;width:95%"></label><button style="display:block;margin-top:20px;background:#a38c5f;border:0;color:white;padding:12px 22px;border-radius:8px">Authorize</button></form></body></html>');
+   return text(res,200,'<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Allow Coach Journal Access</title><body style="font:17px system-ui;background:#faf9f4;display:grid;place-items:center;min-height:90vh"><form method="POST" action="/oauth/authorize" style="max-width:420px;background:white;padding:28px;border:1px solid #d7c6a2;border-radius:12px"><h2>Connect Coach Journal</h2><p>You are signed into your journal.</p><p>Allow the ChatGPT connector to read profiles and add training cards?</p>'+hidden+'<button style="display:block;margin-top:20px;background:#a38c5f;border:0;color:white;padding:12px 22px;border-radius:8px">Allow access</button></form></body></html>');
   }
-  if(!safeEqual(b.password||'',password))return text(res,403,'Incorrect password. Return to ChatGPT and retry authorization.');
   const code=rand(),scope='journal:read journal:write';
   await pool.query("INSERT INTO oauth_codes(code_hash,client_id,redirect_uri,code_challenge,scope,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL '5 minutes')",[hash(code),cid,redir,challenge,scope]);
   const destination=new URL(redir);destination.searchParams.set('code',code);if(b.state)destination.searchParams.set('state',b.state);
