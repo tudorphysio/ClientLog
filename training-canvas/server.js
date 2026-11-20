@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
+const mcpBridge = require('./mcp');
 
 const PORT = Number(process.env.PORT) || 8080;
 const PASSWORD = process.env.APP_PASSWORD || '';
@@ -81,6 +82,7 @@ function normalizeCanvas(x) {
 }
 async function handler(req,res) {
   const pathname=new URL(req.url||'/', 'http://localhost').pathname;
+  if (mcpBridge.handles(pathname)) return mcpBridge.handle(req,res,pool,PASSWORD);
   if(pathname==='/health')return send(res,200,{ok:true});
   if(pathname==='/login' && req.method==='GET') return serve(res,loginPage,'text/html; charset=utf-8');
   if(pathname==='/api/login' && req.method==='POST') {
@@ -144,7 +146,7 @@ async function handler(req,res) {
   }
   return send(res,404,{error:'Not found'});
 }
-setup().then(()=>{
+Promise.all([setup(),mcpBridge.init(pool)]).then(()=>{
   http.createServer((req,res)=>handler(req,res).catch(err=>{
     console.error('Request failed',err.message);
     if(!res.headersSent)send(res,err.status||500,{error:err.status?err.message:'Server error'});
