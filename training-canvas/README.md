@@ -43,3 +43,22 @@ This is a single-owner prototype, not a clinical electronic medical-record syste
 - Data stored in Railway Postgres, not local browser storage. Keep database backups.
 - API card insertion is supported; real-time multi-device editing/merge, access auditing and fine-grained permissions are not yet implemented.
 - This is not automatically deployed to your Railway service simply by writing to GitHub; configure Railway variables and deploy.
+
+## Direct ChatGPT MCP connection (OAuth)
+
+The deployed service now includes:
+- HTTPS MCP endpoint: `https://clientlog-production-8c3920e3.up.railway.app/mcp`
+- OAuth authorization discovery and short-lived access/refresh tokens, with PKCE and dynamic client registration.
+- Four tools: `list_training_profiles`, `read_training_profile`, `create_training_profile`, `add_training_card`.
+- Authenticated access only. ChatGPT will prompt for the existing `APP_PASSWORD` during the OAuth permission step; never put it in chat, GitHub, or a public URL.
+
+In ChatGPT Plugins > + > Add custom MCP server:
+1. Name: **Coach Journal**
+2. Server URL: `https://clientlog-production-8c3920e3.up.railway.app/mcp`
+3. Authentication: **OAuth** (dynamic client registration, no client secret required)
+4. Create/Connect and sign in on the Railway-hosted authorization page using `APP_PASSWORD`.
+5. Install/enable the connected plugin and test by asking to list training profiles.
+
+Deployment must have finished before attempting connection. The username/password interface for the journal and the OAuth authorization form are separate. If endpoint discovery fails, check Railway logs and verify the new deployment includes `mcp.js`.
+
+The OAuth redirect allowlist intentionally accepts ChatGPT/OpenAI HTTPS callback domains, not arbitrary websites. Renewing tokens requires a connected client. Do not add sensitive medical information before reviewing your own data handling requirements.
