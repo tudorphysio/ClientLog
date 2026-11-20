@@ -80,7 +80,7 @@ async function callTool(pool,name,a){
   return {profile:r.rows[0],created:true};
  }
  if(name==='upsert_workout_session'){
-  if(!validId(a.profile_id)||typeof a.date!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(a.date))throw Error('Invalid profile or date');
+  if(!validId(a.profile_id)||typeof a.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(a.date))throw Error('Invalid profile or date');
   if(typeof a.note!=='string'||!a.note.trim()||a.note.length>14000)throw Error('Invalid workout note');
   const conn=await pool.connect();
   try{
@@ -89,10 +89,10 @@ async function callTool(pool,name,a){
    if(!r.rows.length)throw Error('Profile not found');
    const canvas=r.rows[0].payload;
    if(!canvas||!Array.isArray(canvas.cards))throw Error('Invalid canvas');
-   let card=canvas.cards.find(c=>c.type==='training'&&c.date===a.date&&/^Workout(?:\\s|\\s*[—–-])/i.test(c.title||''));
+   let card=canvas.cards.find(c=>c.type==='training'&&c.date===a.date&&/^Workout(?:\s|\s*[—–-])/i.test(c.title||''));
    let created=false;
    if(card){
-    card.note=a.mode==='replace'?a.note:card.note.trimEnd()+'\\n'+a.note;
+    card.note=a.mode==='replace'?a.note:card.note.trimEnd()+'\n'+a.note;
     if(card.note.length>15000)throw Error('Workout note too large; consolidate older details first');
    }else{
     if(canvas.cards.length>=1500)throw Error('Card limit reached');
@@ -110,7 +110,7 @@ async function callTool(pool,name,a){
  }
  if(name==='consolidate_training_cards'){
   if(!validId(a.profile_id)||!Array.isArray(a.card_ids)||a.card_ids.length<2||new Set(a.card_ids).size!==a.card_ids.length)throw Error('Invalid card selection');
-  if(typeof a.date!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(a.date)||typeof a.note!=='string'||!a.note.trim()||a.note.length>15000||typeof a.title!=='string'||!a.title.trim())throw Error('Invalid session details');
+  if(typeof a.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(a.date)||typeof a.note!=='string'||!a.note.trim()||a.note.length>15000||typeof a.title!=='string'||!a.title.trim())throw Error('Invalid session details');
   const conn=await pool.connect();
   try{
    await conn.query('BEGIN');
