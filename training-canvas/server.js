@@ -119,6 +119,12 @@ async function handler(req,res) {
     const result=await pool.query('SELECT id,name,payload,updated_at FROM workspaces WHERE id=$1',[m[1]]);
     return result.rows.length?send(res,200,result.rows[0]):send(res,404,{error:'Workspace not found'});
   }
+  if(m&&req.method==='PATCH'){
+    const body=await jsonBody(req);
+    if(!body||typeof body.name!=='string'||!body.name.trim()||body.name.trim().length>100)return send(res,400,{error:'Invalid workspace name'});
+    const result=await pool.query('UPDATE workspaces SET name=$2,updated_at=NOW() WHERE id=$1 RETURNING id,name,updated_at',[m[1],body.name.trim()]);
+    return result.rows.length?send(res,200,result.rows[0]):send(res,404,{error:'Workspace not found'});
+  }
   if(m&&req.method==='PUT'){
     const body=await jsonBody(req),canvas=normalizeCanvas(body);
     if(!canvas)return send(res,400,{error:'Invalid canvas'});
